@@ -3,15 +3,37 @@ Servicio ligero de Texto a Voz (TTS) basado exclusivamente en `piper-tts` / VITS
 Genera archivos WAV en el almacenamiento temporal acotado (/tmp/hakuyomi_audio).
 """
 
+import json
 import time
 import wave
 from pathlib import Path
+from piper.config import PhonemeType, PiperConfig
 from piper.voice import PiperVoice
 
 from app.core.config import settings
 from app.services.temp_storage import allocate_temp_path, remove_temp_file
 
 _piper_voice_instance: PiperVoice | None = None
+
+
+def _normalize_piper_config(config_path: Path) -> None:
+    """
+    Corrige incompatibilidad de StrEnum en Python 3.11+ donde `piper-tts` evalúa
+    `str(PhonemeType.ESPEAK)` como `'PhonemeType.ESPEAK'` en lugar de `'espeak'`.
+    """
+    if not config_path.exists():
+        return
+    try:
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+        raw_pt = data.get("phoneme_type")
+        if raw_pt in (None, "PhonemeType.ESPEAK", "ESPEAK"):
+            data["phoneme_type"] = PhonemeType.ESPEAK.value
+            config_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        elif raw_pt in ("PhonemeType.TEXT", "TEXT"):
+            data["phoneme_type"] = PhonemeType.TEXT.value
+            config_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
 
 
 def get_piper_voice() -> PiperVoice:
@@ -26,6 +48,7 @@ def get_piper_voice() -> PiperVoice:
                 f"No se encontró el modelo ligero Piper/VITS en {model_path}. "
                 "Ejecute `python scripts/download_models.py`."
             )
+        _normalize_piper_config(config_path)
         _piper_voice_instance = PiperVoice.load(
             str(model_path),
             config_path=str(config_path) if config_path.exists() else None,

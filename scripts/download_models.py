@@ -6,6 +6,7 @@ Garantiza que SOLO se descarguen:
 Bloquea cualquier intento de descargar modelos pesados (small, medium, large).
 """
 
+import json
 import os
 import sys
 import urllib.request
@@ -51,6 +52,15 @@ def download_piper_model(piper_dir: Path) -> None:
         url_json = f"{PIPER_BASE_URL}/{PIPER_VOICE}.onnx.json"
         print(f"[INFO] Descargando configuración de modelo TTS: {url_json}")
         urllib.request.urlretrieve(url_json, json_file)
+
+    # Normalizar phoneme_type para Python 3.11+ StrEnum
+    if json_file.exists():
+        data = json.loads(json_file.read_text(encoding="utf-8"))
+        if data.get("phoneme_type") in (None, "PhonemeType.ESPEAK", "ESPEAK"):
+            data["phoneme_type"] = "espeak"
+            json_file.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
 
 
 def download_whisper_base(whisper_dir: Path) -> None:

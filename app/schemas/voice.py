@@ -6,13 +6,25 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.core.config import settings
 
-ALLOWED_AUDIO_EXTENSIONS = {".mp3", ".wav"}
-ALLOWED_AUDIO_MIMES = {
-    "audio/mpeg",
-    "audio/mp3",
-    "audio/wav",
-    "audio/x-wav",
-    "audio/wave",
+ALLOWED_AUDIO_EXTENSIONS = {
+    ".mp3",
+    ".wav",
+    ".ogg",
+    ".opus",
+    ".m4a",
+    ".flac",
+    ".webm",
+    ".aac",
+    ".wma",
+    ".mp4",
+    ".mpeg",
+    ".mpga",
+}
+
+ALLOWED_AUDIO_MIME_PREFIXES = ("audio/", "video/")
+ALLOWED_EXACT_MIMES = {
+    "application/ogg",
+    "application/x-ogg",
     "application/octet-stream",
 }
 
@@ -23,7 +35,7 @@ class STTUploadPayload(BaseModel):
     filename: str = Field(..., min_length=1, max_length=255, description="Nombre del archivo adjunto")
     content_type: str = Field(
         default="audio/wav",
-        description="MIME type del archivo de audio (audio/mpeg, audio/wav)",
+        description="MIME type del archivo de audio (.mp3, .wav, .ogg, .m4a, .flac, .webm, etc.)",
     )
     file_size_bytes: int | None = Field(
         default=None,
@@ -43,17 +55,20 @@ class STTUploadPayload(BaseModel):
         ext = Path(value).suffix.lower()
         if ext not in ALLOWED_AUDIO_EXTENSIONS:
             raise ValueError(
-                f"Extensión '{ext}' no permitida. Solo se admiten archivos: {sorted(ALLOWED_AUDIO_EXTENSIONS)}"
+                f"Extensión '{ext}' no permitida. Formatos soportados: "
+                f"{', '.join(sorted(ALLOWED_AUDIO_EXTENSIONS))}"
             )
         return value
 
     @field_validator("content_type")
     @classmethod
     def validate_audio_mime(cls, value: str) -> str:
-        mime = value.split(";")[0].strip().lower()
-        if mime not in ALLOWED_AUDIO_MIMES:
+        mime = (value or "application/octet-stream").split(";")[0].strip().lower()
+        if not (
+            mime.startswith(ALLOWED_AUDIO_MIME_PREFIXES) or mime in ALLOWED_EXACT_MIMES
+        ):
             raise ValueError(
-                f"Content-Type '{mime}' no soportado. Permitidos: {sorted(ALLOWED_AUDIO_MIMES)}"
+                f"Content-Type '{mime}' no soportado para archivos de audio."
             )
         return mime
 
