@@ -43,6 +43,7 @@ services:
     environment:
       APP_NAME: ${APP_NAME:-hakuyomi-voice-api}
       APP_ENV: ${APP_ENV:-production}
+      API_AUTH_TOKEN: ${API_AUTH_TOKEN:-hakuyomi-secret-api-token-2026}
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://hakuyomi_user:changeme_secure_password_2026@db:5432/hakuyomi_voice_db}
       STT_MODEL_NAME: ${STT_MODEL_NAME:-base}
       STT_DEVICE: ${STT_DEVICE:-cpu}
@@ -51,7 +52,7 @@ services:
       PIPER_VOICE_MODEL: ${PIPER_VOICE_MODEL:-es_MX-ald-medium}
       MODEL_CACHE_DIR: /app/models
       TEMP_AUDIO_DIR: /tmp/hakuyomi_audio
-      MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB:-25}
+      MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB:-10}
       TEMP_FILE_TTL_SECONDS: ${TEMP_FILE_TTL_SECONDS:-300}
     ports:
       - "${APP_PORT:-8000}:8000"

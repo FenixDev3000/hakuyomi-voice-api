@@ -31,9 +31,9 @@ Para garantizar que el proyecto completo (imágenes Docker, dependencias de sist
 
 ---
 
-## 3. Flujo de STT en Tiempo Real mediante WebSockets (`/ws/stt`)
+## 3. Flujo de STT en Tiempo Real mediante WebSockets (`ws://.../api/v1/stt/stream`)
 
-El endpoint `WS /ws/stt` permite transcribir audio en tiempo real mediante *streaming* bidireccional de baja latencia entre el cliente y el motor `whisper-base`.
+El endpoint `WS /api/v1/stt/stream` permite transcribir audio en tiempo real mediante *streaming* bidireccional de baja latencia e inferencia iterativa sobre `whisper-base`.
 
 ### 3.1 Diagrama de Secuencia del Flujo WebSocket
 
@@ -41,56 +41,52 @@ El endpoint `WS /ws/stt` permite transcribir audio en tiempo real mediante *stre
 sequenceDiagram
     autonumber
     participant C as Cliente (Browser / App)
-    participant WS as FastAPI WebSocket (/ws/stt)
-    participant BUF as Buffer de Sesión (RAM / tmpfs)
+    participant SEC as Guardia de Seguridad (verify_ws_auth)
+    participant WS as FastAPI WebSocket (/api/v1/stt/stream)
+    participant BUF as Buffer de Sesión (RAM / tmpfs <= 10MB)
     participant STT as Motor whisper-base (CPU int8)
     participant DB as PostgreSQL (voice_logs)
 
-    C->>WS: Conexión WebSocket (Handshake)
-    WS-->>C: {"type": "session_started", "session_id": "uuid", "model": "whisper-base"}
+    C->>WS: Conexión WebSocket + Token (Bearer / X-API-Key / ?token=)
+    WS->>SEC: Valida token con secrets.compare_digest
+    alt Token Inválido
+        SEC-->>C: Close 1008 Policy Violation
+    else Token Válido
+        WS-->>C: {"type": "session_started", "session_id": "uuid", "iteration": 0, "model": "whisper-base"}
+    end
 
-    loop Streaming de Audio en Tiempo Real
-        C->>WS: Frame Binario (Chunk PCM 16-bit 16kHz / WebM)
-        WS->>BUF: Acumula chunk (valida límite WS_MAX_BUFFER_BYTES)
+    loop Streaming Iterativo de Fragmentos de Audio
+        C->>WS: Frame Binario (Chunk PCM 16-bit 16kHz)
+        WS->>BUF: Valida con STTStreamChunkPayload y acumula (máx 10 MB)
         alt Ventana temporal alcanzada (>= 2.0s de audio)
-            BUF->>STT: Envía ventana de audio en archivo efímero / memoria
-            STT-->>WS: Segmentos transcritos + confianza
-            WS-->>C: {"type": "partial_transcript", "text": "...", "is_final": false}
+            BUF->>STT: Transcribe ventana en archivo efímero (/tmp/hakuyomi_audio)
+            STT-->>WS: Transcripción parcial iterativa
+            WS-->>C: {"type": "partial_transcript", "iteration": N, "text": "...", "is_final": false}
         end
     end
 
-    C->>WS: {"action": "flush"} o cierre de stream
-    WS->>BUF: Vuelca buffer remanente a archivo temporal (.wav)
+    C->>WS: {"action": "flush"} o {"action": "stop"} (STTStreamControlPayload)
+    WS->>BUF: Vuelca buffer remanente a contenedor WAV temporal
     BUF->>STT: Transcripción final consolidada (beam_size=5, vad_filter=True)
-    STT-->>WS: Texto final completo + idioma detectado + duración
-    WS->>DB: INSERT metadatos de sesión (sin guardar el audio crudo)
-    WS->>BUF: Elimina archivo temporal y libera buffer en RAM
-    WS-->>C: {"type": "final_transcript", "text": "...", "is_final": true}
+    STT-->>WS: Texto final completo + idioma + duración
+    WS->>DB: INSERT metadatos de sesión (stt_stream)
+    WS->>BUF: Elimina archivo temporal y limpia buffer en RAM
+    WS-->>C: {"type": "final_transcript", "iteration": N+1, "text": "...", "is_final": true}
     C->>WS: Close WebSocket (1000 Normal Closure)
 ```
 
-### 3.2 Protocolo de Mensajes y Gestión de Estado
-
-1. **Apertura y Configuración (`Handshake`):**
-   - Al conectar a `/ws/stt?lang=es`, el servidor asigna un `session_id` único (UUIDv4) e inicializa un buffer en memoria restringido por `WS_MAX_BUFFER_BYTES` (por defecto `10 MB` por sesión activa).
-2. **Ingesta de Chunks Binarios:**
-   - El cliente transmite paquetes binarios de audio (`bytes`, recomendablemente PCM 16-bit mono a 16 kHz o contenedores ligeros `.wav`/`.webm`).
-   - Cada vez que el buffer supera el umbral de ventana (`WS_CHUNK_DURATION_MS`, por defecto `2000 ms` ≈ `64 KB` en PCM 16 kHz), el servidor ejecuta una inferencia rápida (`beam_size=1`, `vad_filter=True`) sobre `whisper-base` y emite un evento JSON `partial_transcript`.
-3. **Consolidación (`flush`) y Cierre Limpio:**
-   - Cuando el cliente envía `{"action": "flush"}` o cierra la conexión, se procesa el audio acumulado para emitir `final_transcript`, se persiste únicamente el registro de auditoría en PostgreSQL (`VoiceLog`) y el bloque `finally` destruye inmediatamente cualquier buffer o archivo temporal asociado a la sesión.
-
 ---
 
-## 4. Almacenamiento Temporal de Archivos de Audio Adjuntos
+## 4. Almacenamiento Temporal de Archivos de Audio Adjuntos (`POST /api/v1/stt/upload`)
 
-Tanto la subida de archivos de audio por REST (`POST /api/v1/stt`) como la generación de audio sintetizado (`POST /api/v1/tts`) y los volcados auxiliares de WebSocket requieren almacenamiento efímero en el sistema de archivos.
+Tanto la subida de archivos de audio adjuntos por HTTP (`POST /api/v1/stt/upload`) como la generación de audio sintetizado (`POST /api/v1/tts`) y los volcados auxiliares de WebSocket emplean almacenamiento efímero endurecido.
 
 ### 4.1 Arquitectura del Directorio Temporal (`/tmp/hakuyomi_audio`)
 
 ```mermaid
 flowchart LR
     subgraph Contenedor["Contenedor hakuyomi-voice-api (UID 10001:10001)"]
-        A["UploadFile / Chunks Audio"] --> B["Validador de Tamaño y MIME\n(Máx 25 MB)"]
+        A["UploadFile (.mp3, .wav)\n+ Auth Bearer/API-Key"] --> B["Validador Pydantic STTUploadPayload\n(Extensión, MIME y Límite 10 MB)"]
         B --> C["/tmp/hakuyomi_audio/\n(Volumen tmpfs máx 256 MB)"]
         C --> D["Procesamiento\nwhisper-base / piper-tts"]
         D --> E["Limpieza Inmediata\n(finally / BackgroundTasks)"]
@@ -98,37 +94,22 @@ flowchart LR
     end
 ```
 
-### 4.2 Reglas de Ciclo de Vida y Limpieza Determinista
+### 4.2 Validaciones Estandarizadas y Triple Barrera de Limpieza
 
-1. **Aislamiento en `tmpfs` Acotado:**
-   - En `docker-compose.yml`, la ruta `/tmp/hakuyomi_audio` se monta como un sistema de archivos `tmpfs` limitado a `256 MB` con permisos exclusivos para el usuario sin privilegios (`uid=10001,gid=10001,mode=1770`). Esto garantiza velocidad de E/S en RAM y evita que los archivos temporales consuman disco o superen la cota de `< 10 GB`.
-2. **Validación Previa a la Escritura:**
-   - Se valida la extensión/MIME permitido (`.wav`, `.mp3`, `.ogg`, `.webm`, `.flac`, `.m4a`) y se lee el *stream* en fragmentos de `64 KB`. Si el archivo adjunto supera `MAX_UPLOAD_SIZE_MB` (25 MB), se aborta la escritura inmediatamente, se borra el archivo parcial y se devuelve `HTTP 413 Payload Too Large`.
+1. **Autenticación en Cada Ruta (`app/core/security.py`):**
+   - Las rutas HTTP (`/api/v1/stt/upload`, `/api/v1/tts`) exigen `Depends(verify_http_auth)` y el endpoint WebSocket (`/api/v1/stt/stream`) ejecuta `verify_ws_auth`, validando el token en tiempo constante con `secrets.compare_digest`.
+2. **Validación Pydantic y Límite Estricto de 10 MB (`app/schemas/voice.py`):**
+   - `STTUploadPayload` restringe las extensiones permitidas exclusivamente a `.mp3` y `.wav`, valida el `Content-Type` y aplica el límite de tamaño máximo de **`10 MB` (`MAX_UPLOAD_SIZE_MB=10`)** tanto en cabecera como durante la lectura por *chunks* de `64 KB` (devolviendo `HTTP 413` si se supera).
 3. **Triple Barrera de Limpieza Automática (`app/services/temp_storage.py`):**
-   - **Barrera 1 — Context Manager Síncrono/Asíncrono (`try...finally`):** En `POST /api/v1/stt` y `WS /ws/stt`, el archivo adjunto se envuelve en un gestor de contexto que ejecuta `os.unlink()` en el bloque `finally` tan pronto termina la transcripción de `whisper-base` (incluso si ocurre una excepción).
-   - **Barrera 2 — `BackgroundTasks` Post-Respuesta:** En `POST /api/v1/tts`, el archivo `.wav` generado por `piper-tts` se entrega con `FileResponse` adjuntando una tarea `BackgroundTask(remove_temp_file, path)` que lo elimina inmediatamente después de transmitir el último byte al cliente.
-   - **Barrera 3 — Recolector Asíncrono por TTL:** Un *worker* ligero en segundo plano se ejecuta durante el ciclo de vida (`lifespan`) de FastAPI e inspecciona `/tmp/hakuyomi_audio` cada 60 segundos, eliminando cualquier archivo huérfano cuya antigüedad supere `TEMP_FILE_TTL_SECONDS` (`300 s`).
+   - **Barrera 1 — Context Manager Asíncrono (`try...finally`):** En `POST /api/v1/stt/upload` y `WS /api/v1/stt/stream`, el archivo adjunto se elimina garantizadamente en el bloque `finally` tras completar la inferencia con `whisper-base`.
+   - **Barrera 2 — `BackgroundTasks` Post-Respuesta:** En `POST /api/v1/tts`, el archivo `.wav` generado por `piper-tts` se elimina inmediatamente tras concluir el envío de `FileResponse`.
+   - **Barrera 3 — Recolector Asíncrono por TTL:** Un *worker* en segundo plano inspecciona `/tmp/hakuyomi_audio` cada 60 segundos y purga cualquier archivo con antigüedad mayor a `TEMP_FILE_TTL_SECONDS` (`300 s`).
 
 ---
 
-## 5. Persistencia en PostgreSQL
-
-Para mantener la base de datos ligera y rápida, **nunca se almacenan blobs de audio (`BYTEA`) en PostgreSQL**. Solo se registran metadatos de operación en la tabla `voice_logs`:
-
-- `id` (`UUID`, PK)
-- `operation_type` (`VARCHAR`: `stt_rest`, `stt_ws`, `tts_rest`)
-- `model_used` (`VARCHAR`: `whisper-base` o `piper-tts`)
-- `input_text` / `output_text` (`TEXT`)
-- `audio_duration_sec` (`FLOAT`, opcional)
-- `processing_time_ms` (`FLOAT`)
-- `created_at` (`TIMESTAMP WITH TIME ZONE`)
-
----
-
-## 6. Seguridad del Contenedor (Ejecución No-Root)
+## 5. Seguridad del Contenedor (Ejecución No-Root)
 
 El contenedor cumple buenas prácticas de endurecimiento OCI/Docker:
-- Creación explícita del grupo `appgroup` (`GID 10001`) y usuario `appuser` (`UID 10001`) sin shell interactivo (`/usr/sbin/nologin`).
-- Asignación de propietario `chown -R appuser:appgroup /app /tmp/hakuyomi_audio`.
+- Grupo `appgroup` (`GID 10001`) y usuario `appuser` (`UID 10001`) sin shell interactivo (`/usr/sbin/nologin`).
 - Directiva `USER appuser:appgroup` en `Dockerfile` y `user: "10001:10001"` en `docker-compose.yml`.
 - Directivas `security_opt: ["no-new-privileges:true"]` y `cap_drop: ["ALL"]`.

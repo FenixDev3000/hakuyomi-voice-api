@@ -1,21 +1,21 @@
 """
 Gestión del almacenamiento temporal de archivos de audio adjuntos y generados.
-Garantiza aislamiento en /tmp/hakuyomi_audio, límite estricto de tamaño por archivo
-y purga automática determinista + recolector por TTL.
+Garantiza aislamiento en /tmp/hakuyomi_audio, validación Pydantic del payload,
+límite estricto de tamaño por archivo (10 MB) y purga automática determinista + TTL.
 """
 
 import asyncio
-import os
 import time
 import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import HTTPException, UploadFile, status
+from pydantic import ValidationError
 
 from app.core.config import settings
+from app.schemas.voice import STTUploadPayload
 
-ALLOWED_EXTENSIONS = {".wav", ".mp3", ".ogg", ".webm", ".flac", ".m4a"}
 CHUNK_READ_SIZE = 64 * 1024  # 64 KB
 
 
@@ -43,21 +43,34 @@ def allocate_temp_path(suffix: str = ".wav", prefix: str = "audio_") -> Path:
 
 
 @asynccontextmanager
-async def save_upload_temporarily(upload_file: UploadFile) -> AsyncGenerator[Path, None]:
+async def save_upload_temporarily(
+    upload_file: UploadFile,
+    language: str | None = "es",
+) -> AsyncGenerator[tuple[Path, STTUploadPayload, int], None]:
     """
-    Guarda un archivo de audio adjunto validando su extensión y tamaño máximo,
-    y garantiza su eliminación inmediata al salir del bloque mediante `finally`.
+    Valida el archivo adjunto con Pydantic (`STTUploadPayload`: extensiones .mp3/.wav y
+    límite de 10 MB), lo almacena temporalmente en `/tmp/hakuyomi_audio` y garantiza
+    su eliminación inmediata en el bloque `finally`.
     """
-    filename = upload_file.filename or "audio.wav"
-    ext = Path(filename).suffix.lower() or ".wav"
-    if ext not in ALLOWED_EXTENSIONS:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Formato de archivo '{ext}' no soportado. Permitidos: {sorted(ALLOWED_EXTENSIONS)}",
+    try:
+        payload = STTUploadPayload(
+            filename=upload_file.filename or "",
+            content_type=upload_file.content_type or "audio/wav",
+            file_size_bytes=upload_file.size if upload_file.size and upload_file.size > 0 else None,
+            language=language or "es",
         )
+    except ValidationError as exc:
+        errors = "; ".join(err["msg"] for err in exc.errors())
+        status_code = (
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
+            if "file_size_bytes" in str(exc)
+            else status.HTTP_422_UNPROCESSABLE_ENTITY
+        )
+        raise HTTPException(status_code=status_code, detail=errors) from exc
 
+    ext = Path(payload.filename).suffix.lower()
     temp_path = allocate_temp_path(suffix=ext, prefix="stt_upload_")
-    max_bytes = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
+    max_bytes = settings.max_upload_size_bytes
     total_written = 0
 
     try:
@@ -70,7 +83,10 @@ async def save_upload_temporarily(upload_file: UploadFile) -> AsyncGenerator[Pat
                 if total_written > max_bytes:
                     raise HTTPException(
                         status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                        detail=f"El archivo adjunto excede el límite de {settings.MAX_UPLOAD_SIZE_MB} MB.",
+                        detail=(
+                            f"El archivo adjunto excede el límite estandarizado de "
+                            f"{settings.MAX_UPLOAD_SIZE_MB} MB ({max_bytes} bytes)."
+                        ),
                     )
                 buffer.write(chunk)
 
@@ -80,7 +96,15 @@ async def save_upload_temporarily(upload_file: UploadFile) -> AsyncGenerator[Pat
                 detail="El archivo de audio adjunto está vacío.",
             )
 
-        yield temp_path
+        # Revalidar con el tamaño real escrito en disco
+        validated = STTUploadPayload(
+            filename=payload.filename,
+            content_type=payload.content_type,
+            file_size_bytes=total_written,
+            language=payload.language,
+        )
+
+        yield temp_path, validated, total_written
     finally:
         await upload_file.close()
         remove_temp_file(temp_path)
