@@ -1,0 +1,29 @@
+# Entorno y secretos
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.pytest_cache/
+.ruff_cache/
+
+# Modelos descargados y almacenamiento temporal de audio
+models/
+*.onnx
+*.onnx.json
+*.pt
+*.bin
+tmp_audio/
+/tmp/
+
+# IDE y SO
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,18 @@
+# --- Framework Web & WebSockets ---
+fastapi==0.115.4
+uvicorn[standard]==0.32.0
+python-multipart==0.0.17
+websockets==13.1
+
+# --- Base de Datos PostgreSQL (Asíncrono) ---
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+pydantic==2.9.2
+pydantic-settings==2.6.1
+
+# --- Modelos de Voz Ligeros (Sin dependencias GPU/CUDA pesadas) ---
+# STT: motor ligero basado en CTranslate2 para ejecutar exclusivamente whisper-base (~140MB)
+faster-whisper==1.0.3
+# TTS: motor ligero basado en VITS/ONNX para síntesis local (~150MB)
+piper-tts==1.2.0
+onnxruntime==1.19.2
