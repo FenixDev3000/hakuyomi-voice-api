@@ -1,7 +1,7 @@
-"""Configuración centralizada de hakuyomi-voice-api."""
+"""Configuración centralizada de hakuyomi-voice-api (sin secretos hardcodeados)."""
 
 from pathlib import Path
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,11 +13,9 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "info"
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
 
-    # PostgreSQL
-    DATABASE_URL: str = (
-        "postgresql+asyncpg://hakuyomi_user:changeme_secure_password_2026"
-        "@db:5432/hakuyomi_voice_db"
-    )
+    # Inyectados obligatoriamente por variables de entorno (.env)
+    API_AUTH_TOKEN: str = Field(..., min_length=8)
+    DATABASE_URL: str = Field(..., min_length=12)
 
     # Modelos ligeros exclusivos (< 10 GB total)
     STT_MODEL_NAME: str = "base"
@@ -28,9 +26,9 @@ class Settings(BaseSettings):
     PIPER_SAMPLE_RATE: int = 22050
     MODEL_CACHE_DIR: Path = Path("/app/models")
 
-    # Almacenamiento temporal de audio adjunto y WebSockets
+    # Almacenamiento temporal de audio adjunto y WebSockets (Límite 10 MB)
     TEMP_AUDIO_DIR: Path = Path("/tmp/hakuyomi_audio")
-    MAX_UPLOAD_SIZE_MB: int = 25
+    MAX_UPLOAD_SIZE_MB: int = 10
     TEMP_FILE_TTL_SECONDS: int = 300
     WS_MAX_BUFFER_BYTES: int = 10 * 1024 * 1024  # 10 MB
     WS_CHUNK_DURATION_MS: int = 2000
@@ -62,6 +60,10 @@ class Settings(BaseSettings):
                 "Use exclusivamente 'piper-tts' o 'vits' (~150MB)."
             )
         return value
+
+    @property
+    def max_upload_size_bytes(self) -> int:
+        return self.MAX_UPLOAD_SIZE_MB * 1024 * 1024
 
     @property
     def cors_origin_list(self) -> list[str]:

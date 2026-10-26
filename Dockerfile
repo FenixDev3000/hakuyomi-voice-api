@@ -30,10 +30,12 @@ RUN groupadd -g 10001 appgroup && \
 # 3. Instalar dependencias estrictas de Python sin paquetes CUDA/GPU pesados
 COPY --chown=appuser:appgroup requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir requests==2.32.3
 
 # 4. Copiar código de la aplicación y script de modelos con propietario no-root
 COPY --chown=appuser:appgroup scripts/ ./scripts/
 COPY --chown=appuser:appgroup app/ ./app/
+RUN chown -R appuser:appgroup /app /tmp/hakuyomi_audio
 
 # 5. Cambiar al usuario no-root ANTES de descargar modelos y ejecutar el servidor
 USER appuser:appgroup

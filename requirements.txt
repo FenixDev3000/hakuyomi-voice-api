@@ -3,6 +3,7 @@ fastapi==0.115.4
 uvicorn[standard]==0.32.0
 python-multipart==0.0.17
 websockets==13.1
+requests==2.32.3
 
 # --- Base de Datos PostgreSQL (Asíncrono) ---
 sqlalchemy[asyncio]==2.0.36
