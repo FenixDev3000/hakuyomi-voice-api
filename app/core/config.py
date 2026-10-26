@@ -1,7 +1,7 @@
-"""Configuración centralizada de hakuyomi-voice-api."""
+"""Configuración centralizada de hakuyomi-voice-api (sin secretos hardcodeados)."""
 
 from pathlib import Path
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,14 +13,9 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "info"
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
 
-    # Autenticación estandarizada (Bearer / X-API-Key)
-    API_AUTH_TOKEN: str = "hakuyomi-secret-api-token-2026"
-
-    # PostgreSQL
-    DATABASE_URL: str = (
-        "postgresql+asyncpg://hakuyomi_user:changeme_secure_password_2026"
-        "@db:5432/hakuyomi_voice_db"
-    )
+    # Inyectados obligatoriamente por variables de entorno (.env)
+    API_AUTH_TOKEN: str = Field(..., min_length=8)
+    DATABASE_URL: str = Field(..., min_length=12)
 
     # Modelos ligeros exclusivos (< 10 GB total)
     STT_MODEL_NAME: str = "base"
