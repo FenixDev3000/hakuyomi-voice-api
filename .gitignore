@@ -3,26 +3,30 @@
 .env.*
 !.env.example
 
-# Python
+# Entornos virtuales y caché de Python
+.venv/
+.venv
+venv/
+venv
+env/
 __pycache__/
 *.py[cod]
 *$py.class
-.venv/
-venv/
-env/
 .pytest_cache/
 .ruff_cache/
 
-# Modelos descargados y almacenamiento temporal de audio
-models/
+# Archivos y carpetas de modelos de IA (*.onnx, *.pt, *.bin, etc.)
+/models/
 *.onnx
 *.onnx.json
 *.pt
+*.pth
 *.bin
+*.safetensors
 tmp_audio/
 /tmp/
 
-# IDE y SO
+# IDE y Sistema Operativo
 .vscode/
 .idea/
 .DS_Store
