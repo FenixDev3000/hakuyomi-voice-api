@@ -15,7 +15,7 @@ from app.models.voice_log import VoiceLog
 from app.schemas.voice import STTUploadResponse, TTSRequest
 from app.services.stt_service import transcribe_audio_file
 from app.services.temp_storage import remove_temp_file, save_upload_temporarily
-from app.services.tts_service import synthesize_text_to_wav
+from app.services.tts_service import SUPPORTED_PIPER_VOICES, synthesize_text_to_wav
 
 router = APIRouter(
     prefix="/api/v1",
@@ -24,11 +24,51 @@ router = APIRouter(
 )
 
 
+@router.get("/voices")
+async def list_available_voices():
+    """Devuelve la lista de identificadores de voz Piper/VITS activos en el backend."""
+    return {
+        "voices": [
+            {
+                "id": "es_MX-cori-high",
+                "label": "Latina (es-MX) CORI — Piper/VITS ♀",
+                "gender": "female",
+                "quality": "high",
+            },
+            {
+                "id": "es_MX-claude-high",
+                "label": "Latino (es-MX) CLAUDE — Piper/VITS ♂",
+                "gender": "male",
+                "quality": "high",
+            },
+            {
+                "id": "es_MX-ald-medium",
+                "label": "Latino (es-MX) ALD — Piper/VITS ♂",
+                "gender": "male",
+                "quality": "medium",
+            },
+            {
+                "id": "es_ES-davefx-medium",
+                "label": "Español (es-ES) DAVEFX — Piper/VITS ♂",
+                "gender": "male",
+                "quality": "medium",
+            },
+            {
+                "id": "es_ES-sharvard-medium",
+                "label": "Española (es-ES) DORA — Neuronal ♀",
+                "gender": "female",
+                "quality": "medium",
+            },
+        ],
+        "supported_ids": sorted(SUPPORTED_PIPER_VOICES.keys()),
+    }
+
+
 @router.post("/stt/upload", response_model=STTUploadResponse)
 async def speech_to_text_upload(
     file: UploadFile = File(
         ...,
-        description="Archivo de audio adjunto en formato .mp3 o .wav (máximo 10 MB)",
+        description="Archivo de audio adjunto (.ogg, .mp3, .wav, .m4a, etc. — máximo 10 MB)",
     ),
     language: str = Form(
         default="es",
@@ -39,8 +79,7 @@ async def speech_to_text_upload(
     """
     Endpoint HTTP POST `/api/v1/stt/upload`:
     - Requiere autenticación (`Authorization: Bearer <token>` o `X-API-Key`).
-    - Valida mediante Pydantic (`STTUploadPayload`) extensión (`.mp3`, `.wav`), MIME type
-      y límite máximo de tamaño (`10 MB`).
+    - Valida mediante Pydantic (`STTUploadPayload`) extensión, MIME type y límite de 10 MB.
     - Procesa temporalmente el audio en `/tmp/hakuyomi_audio` con `whisper-base` (~140MB)
       y garantiza su eliminación inmediata al finalizar.
     """
@@ -84,20 +123,23 @@ async def text_to_speech_synthesize(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Sintetiza texto a voz utilizando `piper-tts` / VITS (~150MB) en un archivo temporal
-    y programa su eliminación inmediata tras enviar el `FileResponse`.
+    Sintetiza texto a voz utilizando `piper-tts` / VITS con la voz indicada en `payload.voice`
+    (ej. `es_MX-cori-high` o `es_MX-claude-high`) y elimina el archivo temporal tras enviarlo.
     """
     try:
-        wav_path, elapsed_ms = await asyncio.to_thread(
+        wav_path, elapsed_ms, resolved_voice = await asyncio.to_thread(
             synthesize_text_to_wav,
             payload.text,
+            payload.voice,
         )
+    except ValueError as val_exc:
+        raise HTTPException(status_code=422, detail=str(val_exc)) from val_exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Error en síntesis TTS: {exc}") from exc
 
     log_entry = VoiceLog(
         operation_type="tts_rest",
-        model_used=f"{settings.TTS_ENGINE}:{settings.PIPER_VOICE_MODEL}",
+        model_used=f"{settings.TTS_ENGINE}:{resolved_voice}",
         text_content=payload.text,
         language="es",
         audio_duration_sec=None,
@@ -110,5 +152,5 @@ async def text_to_speech_synthesize(
     return FileResponse(
         path=str(wav_path),
         media_type="audio/wav",
-        filename="hakuyomi_tts.wav",
+        filename=f"hakuyomi_{resolved_voice}.wav",
     )

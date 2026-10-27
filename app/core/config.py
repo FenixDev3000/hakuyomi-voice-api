@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     STT_DEVICE: str = "cpu"
     STT_COMPUTE_TYPE: str = "int8"
     TTS_ENGINE: str = "piper-tts"
-    PIPER_VOICE_MODEL: str = "es_MX-ald-medium"
+    PIPER_VOICE_MODEL: str = "es_MX-cori-high"
     PIPER_SAMPLE_RATE: int = 22050
     MODEL_CACHE_DIR: Path = Path("/app/models")
 

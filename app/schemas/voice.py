@@ -137,11 +137,36 @@ class STTStreamEventResponse(BaseModel):
     detail: str | None = None
 
 
+ALLOWED_TTS_VOICES = {
+    "es_MX-cori-high",
+    "es_MX-claude-high",
+    "es_MX-ald-medium",
+    "es_ES-davefx-medium",
+    "es_ES-sharvard-medium",
+}
+
+
 class TTSRequest(BaseModel):
     """Payload validado para síntesis de voz (POST /api/v1/tts)."""
 
     text: str = Field(..., min_length=1, max_length=2000, description="Texto a sintetizar")
     voice: str | None = Field(
-        default=None,
-        description="Modelo de voz ligero Piper/VITS (por defecto es_MX-ald-medium)",
+        default="es_MX-cori-high",
+        description=(
+            "Identificador de voz Piper/VITS (es_MX-cori-high, es_MX-claude-high, "
+            "es_MX-ald-medium, es_ES-davefx-medium, es_ES-sharvard-medium)"
+        ),
     )
+
+    @field_validator("voice")
+    @classmethod
+    def validate_voice_id(cls, value: str | None) -> str:
+        if not value:
+            return "es_MX-cori-high"
+        clean = value.strip()
+        if clean not in ALLOWED_TTS_VOICES:
+            raise ValueError(
+                f"El identificador de voz '{clean}' no está permitido (Camila y Lucas fueron removidos). "
+                f"Voces válidas: {sorted(ALLOWED_TTS_VOICES)}"
+            )
+        return clean
