@@ -16,7 +16,10 @@ api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 def _is_valid_token(candidate: str | None) -> bool:
     if not candidate:
         return False
-    return secrets.compare_digest(candidate.strip(), settings.API_AUTH_TOKEN)
+    # Comparar en bytes: compare_digest con str no ASCII lanza TypeError (500 en vez de 401)
+    return secrets.compare_digest(
+        candidate.strip().encode("utf-8"), settings.API_AUTH_TOKEN.encode("utf-8")
+    )
 
 
 async def verify_http_auth(

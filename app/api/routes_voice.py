@@ -4,6 +4,7 @@ Todas las rutas aplican autenticación obligatoria, validación Pydantic y lími
 """
 
 import asyncio
+import logging
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +17,8 @@ from app.schemas.voice import STTUploadResponse, TTSRequest
 from app.services.stt_service import transcribe_audio_file
 from app.services.temp_storage import remove_temp_file, save_upload_temporarily
 from app.services.tts_service import SUPPORTED_PIPER_VOICES, synthesize_text_to_wav
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api/v1",
@@ -135,7 +138,8 @@ async def text_to_speech_synthesize(
     except ValueError as val_exc:
         raise HTTPException(status_code=422, detail=str(val_exc)) from val_exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Error en síntesis TTS: {exc}") from exc
+        logger.exception("Fallo interno en síntesis TTS")
+        raise HTTPException(status_code=500, detail="Error interno en la síntesis de voz.") from exc
 
     log_entry = VoiceLog(
         operation_type="tts_rest",

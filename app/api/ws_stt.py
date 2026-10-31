@@ -134,7 +134,7 @@ async def websocket_realtime_stt_stream(websocket: WebSocket, lang: str = "es"):
                         session_id=session_id,
                         iteration=iteration,
                         language=current_lang,
-                        detail=f"Payload de control inválido: {exc}",
+                        detail="Payload de control inválido.",
                     )
                     await websocket.send_json(err_event.model_dump())
                     continue
