@@ -1,5 +1,6 @@
 """Configuración asíncrona de SQLAlchemy con PostgreSQL."""
 
+import asyncio
 from collections.abc import AsyncGenerator
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
@@ -27,8 +28,16 @@ class Base(DeclarativeBase):
 
 async def init_db() -> None:
     """Inicializa las tablas en PostgreSQL al arrancar la aplicación."""
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    # Compose v1 no espera al healthcheck de la base: reintenta hasta que acepte conexiones.
+    for intento in range(1, 16):
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            return
+        except Exception:
+            if intento == 15:
+                raise
+            await asyncio.sleep(2)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

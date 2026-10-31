@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     APP_HOST: str = "0.0.0.0"
     APP_PORT: int = 8000
     LOG_LEVEL: str = "info"
+    # /docs, /redoc y /openapi.json solo se activan con DOCS_HABILITADAS=1 (solo en local)
+    DOCS_HABILITADAS: bool = False
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
 
     # Inyectados obligatoriamente por variables de entorno (.env)
