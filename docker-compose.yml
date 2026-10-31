@@ -30,6 +30,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        INSTALL_DEV: ${INSTALL_DEV:-0}
     image: hakuyomi-voice-api:1.0.0
     container_name: hakuyomi_voice_api
     restart: always

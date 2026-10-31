@@ -32,9 +32,16 @@ COPY --chown=appuser:appgroup requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir requests==2.32.3
 
+# Herramientas de prueba solo si se construye con INSTALL_DEV=1 (no van en la imagen de la VM)
+ARG INSTALL_DEV=0
+COPY requirements-dev.txt .
+RUN if [ "$INSTALL_DEV" = "1" ]; then pip install --no-cache-dir -r requirements-dev.txt; fi
+
 # 4. Copiar código de la aplicación y script de modelos con propietario no-root
 COPY --chown=appuser:appgroup scripts/ ./scripts/
 COPY --chown=appuser:appgroup app/ ./app/
+COPY --chown=appuser:appgroup tests/ ./tests/
+COPY --chown=appuser:appgroup pytest.ini .
 RUN chown -R appuser:appgroup /app /tmp/hakuyomi_audio
 
 # 5. Cambiar al usuario no-root ANTES de descargar modelos y ejecutar el servidor
